@@ -9,6 +9,7 @@ import {
   Eye,
   EyeOff,
   Layers,
+  Trash2,
 } from 'lucide-react';
 
 export const MenuAdmin: React.FC = () => {
@@ -103,6 +104,19 @@ export const MenuAdmin: React.FC = () => {
       loadData();
     } catch (err) {
       alert('Lỗi cập nhật trạng thái món');
+    }
+  };
+
+  const handleDeleteProduct = async (prod: Product) => {
+    const confirm = window.confirm(`Bạn có chắc chắn muốn xoá món "${prod.name}" không?`);
+    if (!confirm) return;
+
+    try {
+      await api.deleteProduct(prod.id);
+      loadData();
+    } catch (err: any) {
+      alert(err.message || 'Không thể xoá món');
+      loadData();
     }
   };
 
@@ -247,14 +261,24 @@ export const MenuAdmin: React.FC = () => {
                         </button>
                       </td>
                       <td className="py-3 text-right">
-                        <button
-                          type="button"
-                          onClick={() => handleOpenProductModal(prod)}
-                          className="px-3 py-1.5 rounded-xl border border-stone-200 hover:bg-stone-100 text-stone-700 text-xs font-semibold inline-flex items-center gap-1"
-                        >
-                          <Edit2 className="w-3 h-3 text-stone-500" />
-                          <span>Sửa</span>
-                        </button>
+                        <div className="inline-flex items-center gap-1.5 justify-end">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenProductModal(prod)}
+                            className="px-2.5 py-1.5 rounded-xl border border-stone-200 hover:bg-stone-100 text-stone-700 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <Edit2 className="w-3 h-3 text-stone-500" />
+                            <span>Sửa</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteProduct(prod)}
+                            className="p-1.5 rounded-xl border border-stone-200 hover:bg-red-50 hover:border-red-200 text-stone-400 hover:text-red-600 transition-colors cursor-pointer"
+                            title="Xoá món"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );

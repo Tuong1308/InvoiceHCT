@@ -224,6 +224,43 @@ export const api = {
     return newProd;
   },
 
+  async deleteProduct(id: string): Promise<void> {
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from('products').delete().eq('id', id);
+      if (error) {
+        // Foreign key constraint (item has been sold before in bill_items)
+        if (error.code === '23503') {
+          await this.saveProduct({ id, active: false });
+          throw new Error('Món này đã từng bán trong hoá đơn nên hệ thống tự động chuyển sang "Ẩn" để giữ nguyên lịch sử bill cũ!');
+        }
+        throw error;
+      }
+      return;
+    }
+
+    const products = getFromStorage<Product[]>(STORAGE_KEYS.PRODUCTS, DEFAULT_PRODUCTS);
+    const updated = products.filter((p) => p.id !== id);
+    saveToStorage(STORAGE_KEYS.PRODUCTS, updated);
+  },
+
+  async deleteCategory(id: string): Promise<void> {
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from('categories').delete().eq('id', id);
+      if (error) {
+        if (error.code === '23503') {
+          await this.saveCategory({ id, active: false });
+          throw new Error('Danh mục này đang có món ăn nên hệ thống tự động chuyển sang "Ẩn"!');
+        }
+        throw error;
+      }
+      return;
+    }
+
+    const categories = getFromStorage<Category[]>(STORAGE_KEYS.CATEGORIES, DEFAULT_CATEGORIES);
+    const updated = categories.filter((c) => c.id !== id);
+    saveToStorage(STORAGE_KEYS.CATEGORIES, updated);
+  },
+
   // 3. Create Bill (atomic, idempotent, sequential DDMMYY-NNN)
   async createBill(payload: CreateBillPayload): Promise<{ bill: Bill; items: BillItem[] }> {
     if (isSupabaseConfigured && supabase) {
