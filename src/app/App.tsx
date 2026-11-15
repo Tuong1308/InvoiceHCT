@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { ShopSettings } from '../types/database';
 import { PosView } from '../features/pos/PosView';
 import { TodayDashboard } from '../features/reports/TodayDashboard';
+import { ModernDashboard } from '../features/dashboard/ModernDashboard';
 import { CashManagement } from '../features/cash/CashManagement';
 import { BillHistory } from '../features/bills/BillHistory';
 import { DaySummary } from '../features/reports/DaySummary';
@@ -13,6 +14,7 @@ import { LoginPage } from '../features/auth/LoginPage';
 import {
   ShoppingBag,
   TrendingUp,
+  LayoutDashboard,
   Wallet,
   Receipt,
   FileText,
@@ -24,6 +26,7 @@ import {
 } from 'lucide-react';
 
 type Screen =
+  | 'dashboard'
   | 'pos'
   | 'today_revenue'
   | 'cash'
@@ -105,13 +108,14 @@ export const App: React.FC = () => {
 
   // Navigation Items
   const navItems = [
-    { id: 'pos' as Screen, label: '1. Bán hàng (Màn chính)', icon: ShoppingBag },
-    { id: 'today_revenue' as Screen, label: '2. Doanh thu hôm nay', icon: TrendingUp },
-    { id: 'cash' as Screen, label: '3. Thu chi tiền mặt', icon: Wallet },
-    { id: 'bill_history' as Screen, label: '4. Lịch sử bill', icon: Receipt },
-    { id: 'day_summary' as Screen, label: '5. Tổng kết ngày', icon: FileText },
-    { id: 'menu_admin' as Screen, label: '6. Quản lý menu', icon: UtensilsCrossed },
-    { id: 'settings' as Screen, label: '7. Cài đặt hệ thống', icon: Settings },
+    { id: 'dashboard' as Screen, label: '1. Tổng quan (Dashboard)', icon: LayoutDashboard },
+    { id: 'pos' as Screen, label: '2. Bán hàng (Màn chính)', icon: ShoppingBag },
+    { id: 'today_revenue' as Screen, label: '3. Doanh thu hôm nay', icon: TrendingUp },
+    { id: 'cash' as Screen, label: '4. Thu chi tiền mặt', icon: Wallet },
+    { id: 'bill_history' as Screen, label: '5. Lịch sử bill', icon: Receipt },
+    { id: 'day_summary' as Screen, label: '6. Tổng kết ngày', icon: FileText },
+    { id: 'menu_admin' as Screen, label: '7. Quản lý menu', icon: UtensilsCrossed },
+    { id: 'settings' as Screen, label: '8. Cài đặt hệ thống', icon: Settings },
   ];
 
   return (
@@ -190,6 +194,17 @@ export const App: React.FC = () => {
 
       {/* Main Screen Content */}
       <main className="flex-1 flex flex-col h-full overflow-hidden">
+        {activeScreen === 'dashboard' && (
+          <ModernDashboard
+            settings={shopSettings}
+            onNavigateToPos={() => setActiveScreen('pos')}
+            onNavigateToBills={() => setActiveScreen('bill_history')}
+            onNavigateToCash={() => setActiveScreen('cash')}
+            onNavigateToSummary={() => setActiveScreen('day_summary')}
+            onOpenDrawer={() => setIsDrawerOpen(true)}
+          />
+        )}
+
         {activeScreen === 'pos' && (
           <PosView
             shopSettings={shopSettings}
