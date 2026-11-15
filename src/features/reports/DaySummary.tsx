@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { BillWithItems, CashEntry, ShopSettings } from '../../types/database';
 import { api } from '../../lib/api';
 import { formatVND, parseVND } from '../../lib/money';
@@ -17,49 +17,113 @@ import {
   Wallet,
   Coffee,
   FileSpreadsheet,
+  CalendarRange,
+  CalendarDays,
 } from 'lucide-react';
+
+type PeriodMode = 'today' | 'single' | 'range' | 'month';
 
 interface DaySummaryProps {
   settings: ShopSettings;
 }
 
 export const DaySummary: React.FC<DaySummaryProps> = ({ settings }) => {
-  const [date, setDate] = useState<string>(getVietnamBusinessDate());
+  const todayStr = getVietnamBusinessDate();
+
+  // Period Selection Mode
+  const [mode, setMode] = useState<PeriodMode>('today');
+  const [singleDate, setSingleDate] = useState<string>(todayStr);
+  const [startDate, setStartDate] = useState<string>(todayStr);
+  const [endDate, setEndDate] = useState<string>(todayStr);
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => todayStr.slice(0, 7)); // YYYY-MM
+
+  // Data State
   const [bills, setBills] = useState<BillWithItems[]>([]);
   const [cashEntries, setCashEntries] = useState<CashEntry[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // Form for counted cash
+  // Form for counted cash (for single day reconciliation)
   const [countedCashStr, setCountedCashStr] = useState<string>('');
   const [closingNote, setClosingNote] = useState<string>('');
   const [isSavingNote, setIsSavingNote] = useState<boolean>(false);
   const [savedSuccess, setSavedSuccess] = useState<boolean>(false);
+  const [exportNotice, setExportNotice] = useState<boolean>(false);
 
+  // Calculate active date range based on mode
+  const { activeStartDate, activeEndDate, periodLabel, isSingleDay } = useMemo(() => {
+    if (mode === 'today') {
+      return {
+        activeStartDate: todayStr,
+        activeEndDate: todayStr,
+        periodLabel: `Hôm nay (${formatVietnamDate(todayStr)})`,
+        isSingleDay: true,
+      };
+    }
+    if (mode === 'single') {
+      return {
+        activeStartDate: singleDate,
+        activeEndDate: singleDate,
+        periodLabel: `Ngày ${formatVietnamDate(singleDate)}`,
+        isSingleDay: true,
+      };
+    }
+    if (mode === 'month') {
+      const [year, month] = selectedMonth.split('-').map(Number);
+      const lastDay = new Date(year, month, 0).getDate();
+      const start = `${selectedMonth}-01`;
+      const end = `${selectedMonth}-${String(lastDay).padStart(2, '0')}`;
+      return {
+        activeStartDate: start,
+        activeEndDate: end,
+        periodLabel: `Tháng ${month}/${year} (${formatVietnamDate(start)} - ${formatVietnamDate(end)})`,
+        isSingleDay: false,
+      };
+    }
+    // range mode
+    const start = startDate <= endDate ? startDate : endDate;
+    const end = startDate <= endDate ? endDate : startDate;
+    return {
+      activeStartDate: start,
+      activeEndDate: end,
+      periodLabel: `Từ ${formatVietnamDate(start)} đến ${formatVietnamDate(end)}`,
+      isSingleDay: start === end,
+    };
+  }, [mode, todayStr, singleDate, startDate, endDate, selectedMonth]);
+
+  // Fetch summary data
   const fetchData = async () => {
     try {
-      const [b, c, dn] = await Promise.all([
-        api.getBills(date),
-        api.getCashEntries(date),
-        api.getDayNote(date),
+      setIsLoading(true);
+      const [b, c] = await Promise.all([
+        api.getBills({ startDate: activeStartDate, endDate: activeEndDate }),
+        api.getCashEntries({ startDate: activeStartDate, endDate: activeEndDate }),
       ]);
       setBills(b);
       setCashEntries(c);
-      if (dn) {
-        setCountedCashStr(dn.counted_cash ? formatVND(dn.counted_cash, false) : '');
-        setClosingNote(dn.note || '');
-      } else {
-        setCountedCashStr('');
-        setClosingNote('');
+
+      // Fetch day note if single day
+      if (isSingleDay) {
+        const dn = await api.getDayNote(activeStartDate);
+        if (dn) {
+          setCountedCashStr(dn.counted_cash ? formatVND(dn.counted_cash, false) : '');
+          setClosingNote(dn.note || '');
+        } else {
+          setCountedCashStr('');
+          setClosingNote('');
+        }
       }
     } catch (err) {
       console.error('Error fetching day summary:', err);
+    } finally {
+      setIsLoading(false);
     }
   };
 
   useEffect(() => {
     fetchData();
-  }, [date]);
+  }, [activeStartDate, activeEndDate, isSingleDay]);
 
-  // Calculations
+  // Financial Calculations
   const validBills = bills.filter((b) => b.status === 'paid');
   const voidBills = bills.filter((b) => b.status === 'void');
 
@@ -84,11 +148,11 @@ export const DaySummary: React.FC<DaySummaryProps> = ({ settings }) => {
 
   const netCash = cashSales + totalIn - totalOut;
 
-  // Actual cash difference
+  // Actual cash difference for single day
   const countedCash = countedCashStr ? parseVND(countedCashStr) : null;
   const discrepancy = countedCash !== null ? countedCash - netCash : null;
 
-  // Items sold
+  // Items sold aggregated across selected period
   const itemsMap: Record<string, { name: string; qty: number; total: number }> = {};
   for (const bill of validBills) {
     for (const item of bill.items) {
@@ -101,10 +165,11 @@ export const DaySummary: React.FC<DaySummaryProps> = ({ settings }) => {
   }
   const itemsSold = Object.values(itemsMap).sort((a, b) => b.qty - a.qty);
 
+  // Save Day Note (Reconciliation)
   const handleSaveDayNote = async () => {
     try {
       setIsSavingNote(true);
-      await api.saveDayNote(date, countedCash, closingNote.trim() || null);
+      await api.saveDayNote(activeStartDate, countedCash, closingNote.trim() || null);
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 3000);
       fetchData();
@@ -115,42 +180,52 @@ export const DaySummary: React.FC<DaySummaryProps> = ({ settings }) => {
     }
   };
 
-  const [exportNotice, setExportNotice] = useState<boolean>(false);
-
+  // Export to Google Sheets & Excel CSV (Safe, No Formula Errors)
   const handleExportGoogleSheet = () => {
-    // Escape cell values for CSV
+    // Escape cell values for CSV: sanitize leading '=', '+', '-', '@'
     const escapeCsv = (val: string | number | null | undefined): string => {
       if (val === null || val === undefined) return '""';
-      const str = String(val).replace(/"/g, '""');
+      let str = String(val).replace(/"/g, '""').trim();
+      // If starts with =, +, -, @, prepend ' to prevent Google Sheets from interpreting as a formula
+      if (/^[=+\-@]/.test(str)) {
+        str = "'" + str;
+      }
       return `"${str}"`;
     };
 
-    // Format rows for Google Sheets / Excel
     const rows: string[][] = [
-      [escapeCsv(`BÁO CÁO TỔNG KẾT BÁN HÀNG NGÀY ${formatVietnamDate(date)}`)],
-      [escapeCsv('Tên tiệm:'), escapeCsv(settings.shop_name)],
-      [escapeCsv('Địa chỉ:'), escapeCsv(settings.address)],
-      [escapeCsv('Số điện thoại:'), escapeCsv(settings.phone)],
-      [escapeCsv('Thời gian xuất file:'), escapeCsv(formatVietnamDateTime(new Date().toISOString()))],
+      [escapeCsv(`BÁO CÁO TỔNG KẾT BÁN HÀNG - ${periodLabel.toUpperCase()}`), '""', '""'],
+      [escapeCsv('Tên tiệm:'), escapeCsv(settings.shop_name), '""'],
+      [escapeCsv('Địa chỉ:'), escapeCsv(settings.address), '""'],
+      [escapeCsv('Số điện thoại:'), escapeCsv(settings.phone), '""'],
+      [escapeCsv('Thời gian xuất file:'), escapeCsv(formatVietnamDateTime(new Date().toISOString())), '""'],
       [],
-      [escapeCsv('--- 1. TỔNG QUAN DOANH THU & TIỀN MẶT ---')],
+      [escapeCsv('--- PHẦN 1: TỔNG QUAN DOANH THU & TIỀN MẶT ---'), '""', '""'],
       [escapeCsv('Chỉ tiêu'), escapeCsv('Số tiền (VND)'), escapeCsv('Ghi chú')],
-      [escapeCsv('TỔNG DOANH THU HÔM NAY'), escapeCsv(totalRevenue), escapeCsv('Bao gồm cả Tiền mặt & Chuyển khoản')],
-      [escapeCsv('+ Tiền mặt bán hàng'), escapeCsv(cashSales), escapeCsv('')],
-      [escapeCsv('+ Chuyển khoản ngân hàng'), escapeCsv(transferSales), escapeCsv('')],
-      [escapeCsv('+ Thu ngoài quỹ tiền mặt'), escapeCsv(totalIn), escapeCsv('Các khoản thu tiền mặt phát sinh')],
-      [escapeCsv('- Chi quỹ tiền mặt'), escapeCsv(totalOut), escapeCsv('Các khoản chi tiền mặt (mua đá, phụ phí...)')],
-      [escapeCsv('TIỀN MẶT RÒNG TRONG KÉT (LÝ THUYẾT)'), escapeCsv(netCash), escapeCsv('= Tiền mặt bán hàng + Thu ngoài - Chi')],
-      [escapeCsv('Tiền đếm thực tế trong két'), escapeCsv(countedCash !== null ? countedCash : 'Chưa đếm'), escapeCsv('Số tiền nhân viên / chủ tiệm đếm')],
-      [escapeCsv('Chênh lệch kiểm két'), escapeCsv(discrepancy !== null ? discrepancy : '--'), escapeCsv(discrepancy === 0 ? 'Khớp 100%' : (discrepancy && discrepancy > 0 ? 'Thừa tiền' : 'Thiếu tiền'))],
-      [escapeCsv('Ghi chú chốt két'), escapeCsv(closingNote || ''), escapeCsv('')],
+      [escapeCsv('TỔNG DOANH THU'), escapeCsv(totalRevenue), escapeCsv('Bao gồm Tiền mặt và Chuyển khoản')],
+      [escapeCsv('Tiền mặt bán hàng'), escapeCsv(cashSales), escapeCsv('Doanh thu từ đơn thanh toán tiền mặt')],
+      [escapeCsv('Chuyển khoản ngân hàng'), escapeCsv(transferSales), escapeCsv('Doanh thu từ đơn chuyển khoản VietQR')],
+      [escapeCsv('Tổng thu ngoài quỹ'), escapeCsv(totalIn), escapeCsv('Các khoản thu tiền mặt phát sinh')],
+      [escapeCsv('Tổng chi quỹ'), escapeCsv(totalOut), escapeCsv('Các khoản chi tiền mặt (mua đá, phụ phí...)')],
+      [escapeCsv('Tiền mặt ròng (trong két)'), escapeCsv(netCash), escapeCsv('Công thức: Tiền mặt bán hàng + Thu ngoài - Chi')],
+    ];
+
+    if (isSingleDay) {
+      rows.push(
+        [escapeCsv('Tiền đếm thực tế trong két'), escapeCsv(countedCash !== null ? countedCash : 'Chưa đếm'), escapeCsv('Số tiền thực tế kiểm đếm')],
+        [escapeCsv('Chênh lệch kiểm két'), escapeCsv(discrepancy !== null ? discrepancy : '--'), escapeCsv(discrepancy === 0 ? 'Khớp 100%' : (discrepancy && discrepancy > 0 ? 'Thừa tiền' : 'Thiếu tiền'))],
+        [escapeCsv('Ghi chú chốt két'), escapeCsv(closingNote || ''), '""']
+      );
+    }
+
+    rows.push(
       [],
-      [escapeCsv('--- 2. THỐNG KÊ ĐƠN HÀNG ---')],
-      [escapeCsv('Trạng thái đơn'), escapeCsv('Số lượng đơn')],
-      [escapeCsv('Đơn hàng hợp lệ (Đã thanh toán)'), escapeCsv(validBills.length)],
-      [escapeCsv('Đơn hàng đã huỷ'), escapeCsv(voidBills.length)],
+      [escapeCsv('--- PHẦN 2: THỐNG KÊ ĐƠN HÀNG ---'), '""', '""'],
+      [escapeCsv('Chỉ tiêu'), escapeCsv('Số lượng đơn'), '""'],
+      [escapeCsv('Đơn hàng hợp lệ (Đã thanh toán)'), escapeCsv(validBills.length), '""'],
+      [escapeCsv('Đơn hàng đã huỷ'), escapeCsv(voidBills.length), '""'],
       [],
-      [escapeCsv('--- 3. BẢNG MÓN BÁN ĐƯỢC TRONG NGÀY ---')],
+      [escapeCsv('--- PHẦN 3: BẢNG MÓN BÁN ĐƯỢC ---'), '""', '""', '""'],
       [escapeCsv('STT'), escapeCsv('Tên món'), escapeCsv('Số lượng bán'), escapeCsv('Tổng doanh thu món (VND)')],
       ...itemsSold.map((item, idx) => [
         escapeCsv(idx + 1),
@@ -159,54 +234,55 @@ export const DaySummary: React.FC<DaySummaryProps> = ({ settings }) => {
         escapeCsv(item.total),
       ]),
       [],
-      [escapeCsv('--- 4. DANH SÁCH CHI TIẾT TẤT CẢ HOÁ ĐƠN ---')],
+      [escapeCsv('--- PHẦN 4: DANH SÁCH CHI TIẾT TẤT CẢ HOÁ ĐƠN ---'), '""', '""', '""', '""', '""', '""', '""'],
       [
         escapeCsv('Mã bill'),
+        escapeCsv('Ngày bán'),
         escapeCsv('Giờ tạo'),
         escapeCsv('Phương thức'),
         escapeCsv('Trạng thái'),
         escapeCsv('Tiền khách đưa (VND)'),
         escapeCsv('Tiền thối (VND)'),
         escapeCsv('Tổng tiền (VND)'),
-        escapeCsv('Lý do huỷ (nếu có)'),
       ],
       ...bills.map((b) => [
         escapeCsv(b.code),
+        escapeCsv(formatVietnamDate(b.business_date)),
         escapeCsv(formatVietnamTime(b.created_at)),
         escapeCsv(b.payment_method === 'cash' ? 'Tiền mặt' : 'Chuyển khoản'),
         escapeCsv(b.status === 'void' ? 'ĐÃ HUỶ' : 'Hợp lệ'),
         escapeCsv(b.cash_received !== null ? b.cash_received : ''),
         escapeCsv(b.change_amount !== null ? b.change_amount : ''),
         escapeCsv(b.total),
-        escapeCsv(b.void_reason || ''),
       ]),
       [],
-      [escapeCsv('--- 5. DANH SÁCH THU CHI QUỸ TIỀN MẶT ---')],
+      [escapeCsv('--- PHẦN 5: DANH SÁCH THU CHI QUỸ TIỀN MẶT ---'), '""', '""', '""', '""', '""'],
       [
         escapeCsv('Loại phiếu'),
+        escapeCsv('Ngày ghi'),
         escapeCsv('Giờ tạo'),
         escapeCsv('Nội dung ghi chú'),
         escapeCsv('Trạng thái'),
         escapeCsv('Số tiền (VND)'),
-        escapeCsv('Lý do huỷ (nếu có)'),
       ],
       ...cashEntries.map((c) => [
         escapeCsv(c.type === 'in' ? 'Thu ngoài' : 'Chi tiền'),
+        escapeCsv(formatVietnamDate(c.business_date)),
         escapeCsv(formatVietnamTime(c.created_at)),
         escapeCsv(c.note),
         escapeCsv(c.status === 'void' ? 'ĐÃ HUỶ' : 'Hợp lệ'),
         escapeCsv(c.type === 'in' ? c.amount : -c.amount),
-        escapeCsv(c.void_reason || ''),
-      ]),
-    ];
+      ])
+    );
 
-    // UTF-8 BOM so Excel & Google Sheets display Vietnamese correctly
+    // UTF-8 BOM so Excel & Google Sheets display Vietnamese correctly without #ERROR!
     const csvContent = '\uFEFF' + rows.map((r) => r.join(',')).join('\r\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `Tong_Ket_Ngay_${date}_${settings.shop_name.replace(/[^a-zA-Z0-9]/g, '_')}.csv`);
+    const sanitizedFilename = `Tong_Ket_${activeStartDate}_den_${activeEndDate}.csv`;
+    link.setAttribute('download', sanitizedFilename);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -218,40 +294,129 @@ export const DaySummary: React.FC<DaySummaryProps> = ({ settings }) => {
 
   return (
     <div className="flex-1 flex flex-col h-full bg-stone-100 overflow-hidden">
-      {/* Header bar */}
-      <div className="p-4 bg-white border-b border-stone-200 shrink-0 flex flex-wrap items-center justify-between gap-3 print:hidden">
-        <div className="flex items-center gap-2">
-          <FileText className="w-5 h-5 text-amber-600" />
-          <h2 className="text-lg font-bold text-stone-900">Tổng kết ngày</h2>
-        </div>
+      {/* Top Filter & Period Control Bar */}
+      <div className="p-4 bg-white border-b border-stone-200 shrink-0 space-y-3">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <FileText className="w-5 h-5 text-amber-600" />
+            <div>
+              <h2 className="text-lg font-bold text-stone-900 leading-tight">Tổng kết & Báo cáo</h2>
+              <p className="text-xs text-stone-500">{periodLabel}</p>
+            </div>
+          </div>
 
-        <div className="flex items-center gap-2">
-          <Calendar className="w-4 h-4 text-stone-400" />
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="px-3 py-1.5 bg-stone-50 border border-stone-300 rounded-xl text-sm font-semibold text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
-          />
-
+          {/* Export Button */}
           <button
             type="button"
             onClick={handleExportGoogleSheet}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-md shadow-emerald-200 transition-all cursor-pointer"
+            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-md shadow-emerald-200 transition-all cursor-pointer shrink-0"
             title="Tải file mở trực tiếp trên Google Sheets và Microsoft Excel"
           >
             <FileSpreadsheet className="w-4 h-4" />
             <span>Xuất Google Sheets / Excel</span>
           </button>
         </div>
+
+        {/* Period Selector Tabs */}
+        <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-stone-100">
+          <div className="inline-flex bg-stone-100 p-1 rounded-xl gap-1 text-xs font-bold text-stone-600">
+            <button
+              type="button"
+              onClick={() => setMode('today')}
+              className={`px-3 py-1.5 rounded-lg transition-all ${
+                mode === 'today' ? 'bg-white text-amber-700 shadow-sm' : 'hover:text-stone-900'
+              }`}
+            >
+              Hôm nay
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('single')}
+              className={`px-3 py-1.5 rounded-lg transition-all ${
+                mode === 'single' ? 'bg-white text-amber-700 shadow-sm' : 'hover:text-stone-900'
+              }`}
+            >
+              1 Ngày
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('range')}
+              className={`px-3 py-1.5 rounded-lg transition-all ${
+                mode === 'range' ? 'bg-white text-amber-700 shadow-sm' : 'hover:text-stone-900'
+              }`}
+            >
+              Nhiều ngày
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('month')}
+              className={`px-3 py-1.5 rounded-lg transition-all ${
+                mode === 'month' ? 'bg-white text-amber-700 shadow-sm' : 'hover:text-stone-900'
+              }`}
+            >
+              Theo tháng
+            </button>
+          </div>
+
+          {/* Inputs for selected mode */}
+          {mode === 'single' && (
+            <div className="flex items-center gap-2 animate-in fade-in-50">
+              <CalendarDays className="w-4 h-4 text-stone-400" />
+              <input
+                type="date"
+                value={singleDate}
+                onChange={(e) => setSingleDate(e.target.value)}
+                className="px-3 py-1.5 bg-stone-50 border border-stone-300 rounded-xl text-xs sm:text-sm font-semibold text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+          )}
+
+          {mode === 'range' && (
+            <div className="flex flex-wrap items-center gap-2 animate-in fade-in-50">
+              <CalendarRange className="w-4 h-4 text-stone-400" />
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-stone-500 font-medium">Từ:</span>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="px-2.5 py-1 bg-stone-50 border border-stone-300 rounded-xl text-xs font-semibold text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-stone-500 font-medium">Đến:</span>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="px-2.5 py-1 bg-stone-50 border border-stone-300 rounded-xl text-xs font-semibold text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+            </div>
+          )}
+
+          {mode === 'month' && (
+            <div className="flex items-center gap-2 animate-in fade-in-50">
+              <Calendar className="w-4 h-4 text-stone-400" />
+              <span className="text-xs text-stone-500 font-medium">Chọn tháng:</span>
+              <input
+                type="month"
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+                className="px-3 py-1.5 bg-stone-50 border border-stone-300 rounded-xl text-xs sm:text-sm font-semibold text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+          )}
+        </div>
       </div>
 
+      {/* Export Success Toast */}
       {exportNotice && (
-        <div className="bg-emerald-50 border-b border-emerald-200 px-4 py-2.5 text-xs text-emerald-800 flex items-center justify-between print:hidden">
+        <div className="bg-emerald-50 border-b border-emerald-200 px-4 py-2.5 text-xs text-emerald-800 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
             <span>
-              <b>Đã xuất file thành công!</b> Bạn có thể mở trực tiếp bằng Excel hoặc tải lên Google Drive / Google Sheets để xem và theo dõi.
+              <b>Đã tải file báo cáo thành công!</b> Bạn có thể mở trực tiếp bằng Microsoft Excel hoặc kéo thả vào Google Sheets/Drive để xem các cột số liệu rõ ràng.
             </span>
           </div>
           <button
@@ -263,14 +428,15 @@ export const DaySummary: React.FC<DaySummaryProps> = ({ settings }) => {
         </div>
       )}
 
-      {/* Printable Report Document */}
-      <div className="flex-1 overflow-y-auto p-4 max-w-4xl w-full mx-auto space-y-5 print:p-0 print:max-w-none">
-        <div className="bg-white rounded-3xl p-6 border border-stone-200 shadow-sm space-y-6 print:border-none print:shadow-none print:p-0">
+      {/* Report Document Body */}
+      <div className="flex-1 overflow-y-auto p-4 max-w-5xl w-full mx-auto space-y-5">
+        <div className="bg-white rounded-3xl p-6 border border-stone-200 shadow-sm space-y-6">
           {/* Report Title */}
           <div className="text-center pb-4 border-b border-stone-200">
             <h1 className="text-xl font-black text-stone-900 uppercase">
-              Báo cáo tổng kết ngày {formatVietnamDate(date)}
+              Báo cáo tổng kết doanh thu
             </h1>
+            <p className="text-sm font-bold text-amber-700 mt-0.5">{periodLabel}</p>
             <p className="text-xs text-stone-500 mt-1">{settings.shop_name} · SĐT: {settings.phone}</p>
           </div>
 
@@ -287,7 +453,7 @@ export const DaySummary: React.FC<DaySummaryProps> = ({ settings }) => {
             </div>
 
             <div className="p-3 bg-stone-50 rounded-2xl border border-stone-200">
-              <span className="text-xs text-stone-500 font-semibold block">Tiền mặt ròng (két)</span>
+              <span className="text-xs text-stone-500 font-semibold block">Tiền mặt ròng (trong két)</span>
               <span className="text-xl font-black text-stone-900 block mt-0.5">
                 {formatVND(netCash)}
               </span>
@@ -307,7 +473,7 @@ export const DaySummary: React.FC<DaySummaryProps> = ({ settings }) => {
             </div>
 
             <div className="p-3 bg-stone-50 rounded-2xl border border-stone-200">
-              <span className="text-xs text-stone-500 font-semibold block">Thu ngoài / Chi</span>
+              <span className="text-xs text-stone-500 font-semibold block">Thu ngoài / Chi quỹ</span>
               <span className="text-xl font-black text-stone-900 block mt-0.5">
                 +{formatVND(totalIn, false)} / -{formatVND(totalOut, false)}
               </span>
@@ -317,91 +483,93 @@ export const DaySummary: React.FC<DaySummaryProps> = ({ settings }) => {
             </div>
           </div>
 
-          {/* Cash Drawer Reconciliation (Kiểm két cuối ngày) */}
-          <div className="p-5 bg-amber-50/70 rounded-2xl border border-amber-200 space-y-3">
-            <h3 className="font-bold text-amber-900 text-sm uppercase tracking-wider flex items-center gap-1.5">
-              <Wallet className="w-4 h-4 text-amber-700" />
-              <span>Kiểm két cuối ngày</span>
-            </h3>
+          {/* Cash Drawer Reconciliation (Only when 1 single day is selected) */}
+          {isSingleDay && (
+            <div className="p-5 bg-amber-50/70 rounded-2xl border border-amber-200 space-y-3">
+              <h3 className="font-bold text-amber-900 text-sm uppercase tracking-wider flex items-center gap-1.5">
+                <Wallet className="w-4 h-4 text-amber-700" />
+                <span>Kiểm két cuối ngày ({formatVietnamDate(activeStartDate)})</span>
+              </h3>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-              <div>
-                <label className="block text-xs font-semibold text-stone-600 mb-1">
-                  Tiền mặt ròng theo hệ thống
-                </label>
-                <div className="px-3.5 py-2.5 bg-white border border-stone-200 rounded-xl font-black text-base text-stone-900">
-                  {formatVND(netCash)}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                <div>
+                  <label className="block text-xs font-semibold text-stone-600 mb-1">
+                    Tiền mặt ròng theo hệ thống
+                  </label>
+                  <div className="px-3.5 py-2.5 bg-white border border-stone-200 rounded-xl font-black text-base text-stone-900">
+                    {formatVND(netCash)}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-stone-600 mb-1">
+                    Tiền đếm thực tế trong két
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="Nhập số tiền đếm được..."
+                    value={countedCashStr}
+                    onChange={(e) => {
+                      const parsed = parseVND(e.target.value);
+                      setCountedCashStr(parsed > 0 ? formatVND(parsed, false) : '');
+                    }}
+                    className="w-full px-3.5 py-2.5 bg-white border border-amber-300 rounded-xl font-bold text-base text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-stone-600 mb-1">
+                    Chênh lệch (Thực tế − Hệ thống)
+                  </label>
+                  <div
+                    className={`px-3.5 py-2.5 rounded-xl font-black text-base border ${
+                      discrepancy === null
+                        ? 'bg-stone-100 text-stone-400 border-stone-200'
+                        : discrepancy === 0
+                        ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                        : discrepancy > 0
+                        ? 'bg-blue-100 text-blue-800 border-blue-300'
+                        : 'bg-red-100 text-red-800 border-red-300'
+                    }`}
+                  >
+                    {discrepancy === null
+                      ? '--'
+                      : discrepancy === 0
+                      ? 'Khớp 100%'
+                      : discrepancy > 0
+                      ? `Thừa +${formatVND(discrepancy)}`
+                      : `Thiếu ${formatVND(Math.abs(discrepancy))}`}
+                  </div>
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-stone-600 mb-1">
-                  Tiền đếm thực tế trong két
-                </label>
+              <div className="flex flex-col sm:flex-row gap-2 pt-2">
                 <input
                   type="text"
-                  inputMode="numeric"
-                  placeholder="Nhập số tiền đếm được..."
-                  value={countedCashStr}
-                  onChange={(e) => {
-                    const parsed = parseVND(e.target.value);
-                    setCountedCashStr(parsed > 0 ? formatVND(parsed, false) : '');
-                  }}
-                  className="w-full px-3.5 py-2.5 bg-white border border-amber-300 rounded-xl font-bold text-base text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  placeholder="Ghi chú chốt két (tuỳ chọn)..."
+                  value={closingNote}
+                  onChange={(e) => setClosingNote(e.target.value)}
+                  className="flex-1 px-3 py-2 bg-white border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-none"
                 />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-stone-600 mb-1">
-                  Chênh lệch (Thực tế − Hệ thống)
-                </label>
-                <div
-                  className={`px-3.5 py-2.5 rounded-xl font-black text-base border ${
-                    discrepancy === null
-                      ? 'bg-stone-100 text-stone-400 border-stone-200'
-                      : discrepancy === 0
-                      ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                      : discrepancy > 0
-                      ? 'bg-blue-100 text-blue-800 border-blue-300'
-                      : 'bg-red-100 text-red-800 border-red-300'
-                  }`}
+                <button
+                  type="button"
+                  disabled={isSavingNote}
+                  onClick={handleSaveDayNote}
+                  className="px-4 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                 >
-                  {discrepancy === null
-                    ? '--'
-                    : discrepancy === 0
-                    ? 'Khớp 100%'
-                    : discrepancy > 0
-                    ? `Thừa +${formatVND(discrepancy)}`
-                    : `Thiếu ${formatVND(Math.abs(discrepancy))}`}
-                </div>
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Lưu chốt két</span>
+                </button>
               </div>
-            </div>
 
-            <div className="flex flex-col sm:flex-row gap-2 pt-2">
-              <input
-                type="text"
-                placeholder="Ghi chú chốt két (tuỳ chọn)..."
-                value={closingNote}
-                onChange={(e) => setClosingNote(e.target.value)}
-                className="flex-1 px-3 py-2 bg-white border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-none"
-              />
-              <button
-                type="button"
-                disabled={isSavingNote}
-                onClick={handleSaveDayNote}
-                className="px-4 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors print:hidden"
-              >
-                <Save className="w-3.5 h-3.5" />
-                <span>Lưu chốt két</span>
-              </button>
+              {savedSuccess && (
+                <p className="text-xs text-emerald-700 font-semibold flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Đã lưu thông tin chốt két!
+                </p>
+              )}
             </div>
-
-            {savedSuccess && (
-              <p className="text-xs text-emerald-700 font-semibold flex items-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5" /> Đã lưu thông tin chốt két!
-              </p>
-            )}
-          </div>
+          )}
 
           {/* Section: Items Sold Table */}
           <div className="space-y-2">
@@ -410,27 +578,31 @@ export const DaySummary: React.FC<DaySummaryProps> = ({ settings }) => {
               <span>Bảng món bán được ({itemsSold.length})</span>
             </h3>
 
-            {itemsSold.length === 0 ? (
-              <p className="text-xs text-stone-400 italic">Không có món nào bán được</p>
+            {isLoading ? (
+              <p className="text-xs text-stone-400">Đang tải dữ liệu...</p>
+            ) : itemsSold.length === 0 ? (
+              <p className="text-xs text-stone-400 italic">Không có món nào bán được trong kỳ này</p>
             ) : (
-              <table className="w-full text-xs sm:text-sm border-collapse">
-                <thead>
-                  <tr className="border-b border-stone-200 text-stone-500 text-xs font-semibold">
-                    <th className="py-2 text-left">Tên món</th>
-                    <th className="py-2 text-center">Số lượng</th>
-                    <th className="py-2 text-right">Tổng thành tiền</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-stone-100">
-                  {itemsSold.map((item, idx) => (
-                    <tr key={idx}>
-                      <td className="py-2 font-medium text-stone-900">{item.name}</td>
-                      <td className="py-2 text-center font-bold text-amber-800">{item.qty}</td>
-                      <td className="py-2 text-right font-bold text-stone-800">{formatVND(item.total)}</td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs sm:text-sm border-collapse">
+                  <thead>
+                    <tr className="border-b border-stone-200 text-stone-500 text-xs font-semibold">
+                      <th className="py-2 text-left">Tên món</th>
+                      <th className="py-2 text-center">Số lượng</th>
+                      <th className="py-2 text-right">Tổng thành tiền</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-stone-100">
+                    {itemsSold.map((item, idx) => (
+                      <tr key={idx}>
+                        <td className="py-2 font-medium text-stone-900">{item.name}</td>
+                        <td className="py-2 text-center font-bold text-amber-800">{item.qty}</td>
+                        <td className="py-2 text-right font-bold text-stone-800">{formatVND(item.total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
 
@@ -441,14 +613,17 @@ export const DaySummary: React.FC<DaySummaryProps> = ({ settings }) => {
               <span>Danh sách hoá đơn ({bills.length})</span>
             </h3>
 
-            {bills.length === 0 ? (
-              <p className="text-xs text-stone-400 italic">Không có hoá đơn nào trong ngày</p>
+            {isLoading ? (
+              <p className="text-xs text-stone-400">Đang tải dữ liệu...</p>
+            ) : bills.length === 0 ? (
+              <p className="text-xs text-stone-400 italic">Không có hoá đơn nào trong khoảng thời gian này</p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-xs border-collapse">
                   <thead>
                     <tr className="border-b border-stone-200 text-stone-500 font-semibold">
                       <th className="py-1.5 text-left">Mã bill</th>
+                      <th className="py-1.5 text-left">Ngày</th>
                       <th className="py-1.5 text-left">Giờ</th>
                       <th className="py-1.5 text-left">Phương thức</th>
                       <th className="py-1.5 text-left">Trạng thái</th>
@@ -459,6 +634,7 @@ export const DaySummary: React.FC<DaySummaryProps> = ({ settings }) => {
                     {bills.map((b) => (
                       <tr key={b.id} className={b.status === 'void' ? 'opacity-50 line-through' : ''}>
                         <td className="py-1.5 font-mono font-bold">{b.code}</td>
+                        <td className="py-1.5 text-stone-500">{formatVietnamDate(b.business_date)}</td>
                         <td className="py-1.5 text-stone-500">{formatVietnamTime(b.created_at)}</td>
                         <td className="py-1.5">{b.payment_method === 'cash' ? 'Tiền mặt' : 'Chuyển khoản'}</td>
                         <td className="py-1.5">
@@ -484,14 +660,17 @@ export const DaySummary: React.FC<DaySummaryProps> = ({ settings }) => {
               <span>Danh sách thu chi quỹ ({cashEntries.length})</span>
             </h3>
 
-            {cashEntries.length === 0 ? (
-              <p className="text-xs text-stone-400 italic">Không có khoản thu chi nào</p>
+            {isLoading ? (
+              <p className="text-xs text-stone-400">Đang tải dữ liệu...</p>
+            ) : cashEntries.length === 0 ? (
+              <p className="text-xs text-stone-400 italic">Không có khoản thu chi nào trong kỳ này</p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-xs border-collapse">
                   <thead>
                     <tr className="border-b border-stone-200 text-stone-500 font-semibold">
                       <th className="py-1.5 text-left">Loại</th>
+                      <th className="py-1.5 text-left">Ngày</th>
                       <th className="py-1.5 text-left">Giờ</th>
                       <th className="py-1.5 text-left">Ghi chú</th>
                       <th className="py-1.5 text-left">Trạng thái</th>
@@ -508,6 +687,7 @@ export const DaySummary: React.FC<DaySummaryProps> = ({ settings }) => {
                             <span className="text-red-700">Chi tiền</span>
                           )}
                         </td>
+                        <td className="py-1.5 text-stone-500">{formatVietnamDate(c.business_date)}</td>
                         <td className="py-1.5 text-stone-500">{formatVietnamTime(c.created_at)}</td>
                         <td className="py-1.5">{c.note}</td>
                         <td className="py-1.5">
@@ -532,4 +712,3 @@ export const DaySummary: React.FC<DaySummaryProps> = ({ settings }) => {
     </div>
   );
 };
-

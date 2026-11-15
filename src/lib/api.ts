@@ -309,10 +309,31 @@ export const api = {
   },
 
   // 4. Bills listing & detail
-  async getBills(date?: string, filterMethod?: string, filterStatus?: string, searchCode?: string): Promise<BillWithItems[]> {
+  async getBills(
+    dateOrRange?: string | { date?: string; startDate?: string; endDate?: string },
+    filterMethod?: string,
+    filterStatus?: string,
+    searchCode?: string
+  ): Promise<BillWithItems[]> {
+    let singleDate: string | undefined;
+    let startDate: string | undefined;
+    let endDate: string | undefined;
+
+    if (typeof dateOrRange === 'string') {
+      singleDate = dateOrRange;
+    } else if (dateOrRange) {
+      singleDate = dateOrRange.date;
+      startDate = dateOrRange.startDate;
+      endDate = dateOrRange.endDate;
+    }
+
     if (isSupabaseConfigured && supabase) {
       let query = supabase.from('bills').select('*, items:bill_items(*)').order('created_at', { ascending: false });
-      if (date) query = query.eq('business_date', date);
+      if (startDate && endDate) {
+        query = query.gte('business_date', startDate).lte('business_date', endDate);
+      } else if (singleDate) {
+        query = query.eq('business_date', singleDate);
+      }
       if (filterMethod && filterMethod !== 'all') query = query.eq('payment_method', filterMethod);
       if (filterStatus && filterStatus !== 'all') query = query.eq('status', filterStatus);
       if (searchCode && searchCode.trim()) query = query.ilike('code', `%${searchCode.trim()}%`);
@@ -325,8 +346,10 @@ export const api = {
     let bills = getFromStorage<Bill[]>(STORAGE_KEYS.BILLS, []);
     const items = getFromStorage<BillItem[]>(STORAGE_KEYS.BILL_ITEMS, []);
 
-    if (date) {
-      bills = bills.filter((b) => b.business_date === date);
+    if (startDate && endDate) {
+      bills = bills.filter((b) => b.business_date >= startDate! && b.business_date <= endDate!);
+    } else if (singleDate) {
+      bills = bills.filter((b) => b.business_date === singleDate);
     }
     if (filterMethod && filterMethod !== 'all') {
       bills = bills.filter((b) => b.payment_method === filterMethod);
@@ -396,18 +419,38 @@ export const api = {
   },
 
   // 5. Cash entries
-  async getCashEntries(date?: string): Promise<CashEntry[]> {
+  async getCashEntries(
+    dateOrRange?: string | { date?: string; startDate?: string; endDate?: string }
+  ): Promise<CashEntry[]> {
+    let singleDate: string | undefined;
+    let startDate: string | undefined;
+    let endDate: string | undefined;
+
+    if (typeof dateOrRange === 'string') {
+      singleDate = dateOrRange;
+    } else if (dateOrRange) {
+      singleDate = dateOrRange.date;
+      startDate = dateOrRange.startDate;
+      endDate = dateOrRange.endDate;
+    }
+
     if (isSupabaseConfigured && supabase) {
       let query = supabase.from('cash_entries').select('*').order('created_at', { ascending: false });
-      if (date) query = query.eq('business_date', date);
+      if (startDate && endDate) {
+        query = query.gte('business_date', startDate).lte('business_date', endDate);
+      } else if (singleDate) {
+        query = query.eq('business_date', singleDate);
+      }
       const { data, error } = await query;
       if (error) throw error;
       return data || [];
     }
 
     let entries = getFromStorage<CashEntry[]>(STORAGE_KEYS.CASH_ENTRIES, []);
-    if (date) {
-      entries = entries.filter((e) => e.business_date === date);
+    if (startDate && endDate) {
+      entries = entries.filter((e) => e.business_date >= startDate! && e.business_date <= endDate!);
+    } else if (singleDate) {
+      entries = entries.filter((e) => e.business_date === singleDate);
     }
     return entries.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   },
