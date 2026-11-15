@@ -119,19 +119,48 @@ begin
   -- 1. Idempotency Check: if bill id already exists, return it
   select * into v_existing_bill from bills where id = p_id;
   if found then
+    select jsonb_agg(to_jsonb(bi)) into v_bill_items
+    from bill_items bi
+    where bi.bill_id = v_existing_bill.id;
+
     return jsonb_build_object(
       'success', true,
       'is_duplicate', true,
-      'bill', to_jsonb(v_existing_bill)
+      'bill', to_jsonb(v_existing_bill),
+      'items', coalesce(v_bill_items, '[]'::jsonb)
     );
   end if;
 
-  -- 2. Business date according to Asia/Ho_Chi_Minh
+  -- 2. Validate items
+  if jsonb_array_length(p_items) = 0 then
+    raise exception 'Đơn hàng không có món nào';
+  end if;
+
+  -- 3. Calculate total and verify products
+  for v_item in select * from jsonb_array_elements(p_items)
+  loop
+    select * into v_product from products where id = (v_item->>'product_id')::uuid;
+    if not found then
+      raise exception 'Món với ID % không tồn tại', (v_item->>'product_id');
+    end if;
+
+    v_calculated_total := v_calculated_total + (v_product.price * (v_item->>'qty')::integer);
+  end loop;
+
+  -- 4. Validate cash received if provided
+  if p_payment_method = 'cash' and p_cash_received is not null then
+    if p_cash_received < v_calculated_total then
+      raise exception 'Tiền khách đưa (%) nhỏ hơn tổng đơn (%)', p_cash_received, v_calculated_total;
+    end if;
+    v_change := p_cash_received - v_calculated_total;
+  end if;
+
+  -- 5. Business date according to Asia/Ho_Chi_Minh
   v_vn_now := now() at time zone 'Asia/Ho_Chi_Minh';
   v_business_date := v_vn_now::date;
   v_prefix := to_char(v_business_date, 'DDMMYY');
 
-  -- 3. Atomic sequence generation
+  -- 6. Atomic sequence generation
   insert into bill_counters (business_date, last_seq)
   values (v_business_date, 1)
   on conflict (business_date)
@@ -140,49 +169,7 @@ begin
 
   v_code := v_prefix || '-' || lpad(v_next_seq::text, 3, '0');
 
-  -- 4. Calculate total and validate items from products table
-  if jsonb_array_length(p_items) = 0 then
-    raise exception 'Đơn hàng không có món nào';
-  end if;
-
-  -- Create temporary storage for verified items
-  create temporary table if not exists temp_items (
-    prod_id uuid,
-    name_snap text,
-    price_snap integer,
-    qty integer,
-    line_total integer
-  ) on commit drop;
-  delete from temp_items;
-
-  for v_item in select * from jsonb_array_elements(p_items)
-  loop
-    select * into v_product from products where id = (v_item->>'product_id')::uuid;
-    if not found then
-      raise exception 'Món với ID % không tồn tại', (v_item->>'product_id');
-    end if;
-
-    insert into temp_items (prod_id, name_snap, price_snap, qty, line_total)
-    values (
-      v_product.id,
-      v_product.name,
-      v_product.price,
-      (v_item->>'qty')::integer,
-      v_product.price * (v_item->>'qty')::integer
-    );
-
-    v_calculated_total := v_calculated_total + (v_product.price * (v_item->>'qty')::integer);
-  end loop;
-
-  -- 5. Validate cash received if provided
-  if p_payment_method = 'cash' and p_cash_received is not null then
-    if p_cash_received < v_calculated_total then
-      raise exception 'Tiền khách đưa (%) nhỏ hơn tổng đơn (%)', p_cash_received, v_calculated_total;
-    end if;
-    v_change := p_cash_received - v_calculated_total;
-  end if;
-
-  -- 6. Insert bill
+  -- 7. Insert bill
   insert into bills (
     id,
     code,
@@ -205,10 +192,21 @@ begin
     'paid'
   ) returning * into v_bill;
 
-  -- 7. Insert bill items
-  insert into bill_items (bill_id, product_id, name_snapshot, price_snapshot, qty, line_total)
-  select v_bill.id, prod_id, name_snap, price_snap, qty, line_total
-  from temp_items;
+  -- 8. Insert bill items directly
+  for v_item in select * from jsonb_array_elements(p_items)
+  loop
+    select * into v_product from products where id = (v_item->>'product_id')::uuid;
+
+    insert into bill_items (bill_id, product_id, name_snapshot, price_snapshot, qty, line_total)
+    values (
+      v_bill.id,
+      v_product.id,
+      v_product.name,
+      v_product.price,
+      (v_item->>'qty')::integer,
+      v_product.price * (v_item->>'qty')::integer
+    );
+  end loop;
 
   -- Select items as json
   select jsonb_agg(to_jsonb(bi)) into v_bill_items
@@ -219,7 +217,7 @@ begin
     'success', true,
     'is_duplicate', false,
     'bill', to_jsonb(v_bill),
-    'items', v_bill_items
+    'items', coalesce(v_bill_items, '[]'::jsonb)
   );
 end;
 $$;

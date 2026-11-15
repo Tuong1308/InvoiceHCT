@@ -2,16 +2,21 @@ import React, { useState, useEffect } from 'react';
 import { BillWithItems, CashEntry, ShopSettings } from '../../types/database';
 import { api } from '../../lib/api';
 import { formatVND, parseVND } from '../../lib/money';
-import { getVietnamBusinessDate, formatVietnamTime, formatVietnamDate } from '../../lib/date';
+import {
+  getVietnamBusinessDate,
+  formatVietnamTime,
+  formatVietnamDate,
+  formatVietnamDateTime,
+} from '../../lib/date';
 import {
   FileText,
   Calendar,
-  Printer,
   Save,
   CheckCircle2,
   Receipt,
   Wallet,
   Coffee,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 interface DaySummaryProps {
@@ -110,8 +115,105 @@ export const DaySummary: React.FC<DaySummaryProps> = ({ settings }) => {
     }
   };
 
-  const handlePrint = () => {
-    window.print();
+  const [exportNotice, setExportNotice] = useState<boolean>(false);
+
+  const handleExportGoogleSheet = () => {
+    // Escape cell values for CSV
+    const escapeCsv = (val: string | number | null | undefined): string => {
+      if (val === null || val === undefined) return '""';
+      const str = String(val).replace(/"/g, '""');
+      return `"${str}"`;
+    };
+
+    // Format rows for Google Sheets / Excel
+    const rows: string[][] = [
+      [escapeCsv(`BÁO CÁO TỔNG KẾT BÁN HÀNG NGÀY ${formatVietnamDate(date)}`)],
+      [escapeCsv('Tên tiệm:'), escapeCsv(settings.shop_name)],
+      [escapeCsv('Địa chỉ:'), escapeCsv(settings.address)],
+      [escapeCsv('Số điện thoại:'), escapeCsv(settings.phone)],
+      [escapeCsv('Thời gian xuất file:'), escapeCsv(formatVietnamDateTime(new Date().toISOString()))],
+      [],
+      [escapeCsv('--- 1. TỔNG QUAN DOANH THU & TIỀN MẶT ---')],
+      [escapeCsv('Chỉ tiêu'), escapeCsv('Số tiền (VND)'), escapeCsv('Ghi chú')],
+      [escapeCsv('TỔNG DOANH THU HÔM NAY'), escapeCsv(totalRevenue), escapeCsv('Bao gồm cả Tiền mặt & Chuyển khoản')],
+      [escapeCsv('+ Tiền mặt bán hàng'), escapeCsv(cashSales), escapeCsv('')],
+      [escapeCsv('+ Chuyển khoản ngân hàng'), escapeCsv(transferSales), escapeCsv('')],
+      [escapeCsv('+ Thu ngoài quỹ tiền mặt'), escapeCsv(totalIn), escapeCsv('Các khoản thu tiền mặt phát sinh')],
+      [escapeCsv('- Chi quỹ tiền mặt'), escapeCsv(totalOut), escapeCsv('Các khoản chi tiền mặt (mua đá, phụ phí...)')],
+      [escapeCsv('TIỀN MẶT RÒNG TRONG KÉT (LÝ THUYẾT)'), escapeCsv(netCash), escapeCsv('= Tiền mặt bán hàng + Thu ngoài - Chi')],
+      [escapeCsv('Tiền đếm thực tế trong két'), escapeCsv(countedCash !== null ? countedCash : 'Chưa đếm'), escapeCsv('Số tiền nhân viên / chủ tiệm đếm')],
+      [escapeCsv('Chênh lệch kiểm két'), escapeCsv(discrepancy !== null ? discrepancy : '--'), escapeCsv(discrepancy === 0 ? 'Khớp 100%' : (discrepancy && discrepancy > 0 ? 'Thừa tiền' : 'Thiếu tiền'))],
+      [escapeCsv('Ghi chú chốt két'), escapeCsv(closingNote || ''), escapeCsv('')],
+      [],
+      [escapeCsv('--- 2. THỐNG KÊ ĐƠN HÀNG ---')],
+      [escapeCsv('Trạng thái đơn'), escapeCsv('Số lượng đơn')],
+      [escapeCsv('Đơn hàng hợp lệ (Đã thanh toán)'), escapeCsv(validBills.length)],
+      [escapeCsv('Đơn hàng đã huỷ'), escapeCsv(voidBills.length)],
+      [],
+      [escapeCsv('--- 3. BẢNG MÓN BÁN ĐƯỢC TRONG NGÀY ---')],
+      [escapeCsv('STT'), escapeCsv('Tên món'), escapeCsv('Số lượng bán'), escapeCsv('Tổng doanh thu món (VND)')],
+      ...itemsSold.map((item, idx) => [
+        escapeCsv(idx + 1),
+        escapeCsv(item.name),
+        escapeCsv(item.qty),
+        escapeCsv(item.total),
+      ]),
+      [],
+      [escapeCsv('--- 4. DANH SÁCH CHI TIẾT TẤT CẢ HOÁ ĐƠN ---')],
+      [
+        escapeCsv('Mã bill'),
+        escapeCsv('Giờ tạo'),
+        escapeCsv('Phương thức'),
+        escapeCsv('Trạng thái'),
+        escapeCsv('Tiền khách đưa (VND)'),
+        escapeCsv('Tiền thối (VND)'),
+        escapeCsv('Tổng tiền (VND)'),
+        escapeCsv('Lý do huỷ (nếu có)'),
+      ],
+      ...bills.map((b) => [
+        escapeCsv(b.code),
+        escapeCsv(formatVietnamTime(b.created_at)),
+        escapeCsv(b.payment_method === 'cash' ? 'Tiền mặt' : 'Chuyển khoản'),
+        escapeCsv(b.status === 'void' ? 'ĐÃ HUỶ' : 'Hợp lệ'),
+        escapeCsv(b.cash_received !== null ? b.cash_received : ''),
+        escapeCsv(b.change_amount !== null ? b.change_amount : ''),
+        escapeCsv(b.total),
+        escapeCsv(b.void_reason || ''),
+      ]),
+      [],
+      [escapeCsv('--- 5. DANH SÁCH THU CHI QUỸ TIỀN MẶT ---')],
+      [
+        escapeCsv('Loại phiếu'),
+        escapeCsv('Giờ tạo'),
+        escapeCsv('Nội dung ghi chú'),
+        escapeCsv('Trạng thái'),
+        escapeCsv('Số tiền (VND)'),
+        escapeCsv('Lý do huỷ (nếu có)'),
+      ],
+      ...cashEntries.map((c) => [
+        escapeCsv(c.type === 'in' ? 'Thu ngoài' : 'Chi tiền'),
+        escapeCsv(formatVietnamTime(c.created_at)),
+        escapeCsv(c.note),
+        escapeCsv(c.status === 'void' ? 'ĐÃ HUỶ' : 'Hợp lệ'),
+        escapeCsv(c.type === 'in' ? c.amount : -c.amount),
+        escapeCsv(c.void_reason || ''),
+      ]),
+    ];
+
+    // UTF-8 BOM so Excel & Google Sheets display Vietnamese correctly
+    const csvContent = '\uFEFF' + rows.map((r) => r.join(',')).join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `Tong_Ket_Ngay_${date}_${settings.shop_name.replace(/[^a-zA-Z0-9]/g, '_')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    setExportNotice(true);
+    setTimeout(() => setExportNotice(false), 5000);
   };
 
   return (
@@ -134,14 +236,32 @@ export const DaySummary: React.FC<DaySummaryProps> = ({ settings }) => {
 
           <button
             type="button"
-            onClick={handlePrint}
-            className="px-4 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors"
+            onClick={handleExportGoogleSheet}
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-md shadow-emerald-200 transition-all cursor-pointer"
+            title="Tải file mở trực tiếp trên Google Sheets và Microsoft Excel"
           >
-            <Printer className="w-4 h-4" />
-            <span>In báo cáo / PDF</span>
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>Xuất Google Sheets / Excel</span>
           </button>
         </div>
       </div>
+
+      {exportNotice && (
+        <div className="bg-emerald-50 border-b border-emerald-200 px-4 py-2.5 text-xs text-emerald-800 flex items-center justify-between print:hidden">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>
+              <b>Đã xuất file thành công!</b> Bạn có thể mở trực tiếp bằng Excel hoặc tải lên Google Drive / Google Sheets để xem và theo dõi.
+            </span>
+          </div>
+          <button
+            onClick={() => setExportNotice(false)}
+            className="text-xs font-bold text-emerald-700 hover:underline"
+          >
+            Đóng
+          </button>
+        </div>
+      )}
 
       {/* Printable Report Document */}
       <div className="flex-1 overflow-y-auto p-4 max-w-4xl w-full mx-auto space-y-5 print:p-0 print:max-w-none">

@@ -23,34 +23,34 @@ const DEFAULT_CATEGORIES: Category[] = [
 
 const DEFAULT_PRODUCTS: Product[] = [
   // Cà phê
-  { id: 'p0111111-0000-0000-0000-000000000001', category_id: 'c1111111-1111-1111-1111-111111111111', name: 'Cà phê đen', price: 20000, sort: 1, active: true },
-  { id: 'p0111111-0000-0000-0000-000000000002', category_id: 'c1111111-1111-1111-1111-111111111111', name: 'Cà phê sữa', price: 25000, sort: 2, active: true },
-  { id: 'p0111111-0000-0000-0000-000000000003', category_id: 'c1111111-1111-1111-1111-111111111111', name: 'Cà phê muối', price: 30000, sort: 3, active: true },
-  { id: 'p0111111-0000-0000-0000-000000000004', category_id: 'c1111111-1111-1111-1111-111111111111', name: 'Bạc xỉu', price: 28000, sort: 4, active: true },
-  { id: 'p0111111-0000-0000-0000-000000000005', category_id: 'c1111111-1111-1111-1111-111111111111', name: 'Americano', price: 32000, sort: 5, active: true },
-  { id: 'p0111111-0000-0000-0000-000000000006', category_id: 'c1111111-1111-1111-1111-111111111111', name: 'Latte', price: 38000, sort: 6, active: true },
+  { id: 'a0111111-0000-0000-0000-000000000001', category_id: 'c1111111-1111-1111-1111-111111111111', name: 'Cà phê đen', price: 20000, sort: 1, active: true },
+  { id: 'a0111111-0000-0000-0000-000000000002', category_id: 'c1111111-1111-1111-1111-111111111111', name: 'Cà phê sữa', price: 25000, sort: 2, active: true },
+  { id: 'a0111111-0000-0000-0000-000000000003', category_id: 'c1111111-1111-1111-1111-111111111111', name: 'Cà phê muối', price: 30000, sort: 3, active: true },
+  { id: 'a0111111-0000-0000-0000-000000000004', category_id: 'c1111111-1111-1111-1111-111111111111', name: 'Bạc xỉu', price: 28000, sort: 4, active: true },
+  { id: 'a0111111-0000-0000-0000-000000000005', category_id: 'c1111111-1111-1111-1111-111111111111', name: 'Americano', price: 32000, sort: 5, active: true },
+  { id: 'a0111111-0000-0000-0000-000000000006', category_id: 'c1111111-1111-1111-1111-111111111111', name: 'Latte', price: 38000, sort: 6, active: true },
 
   // Matcha
-  { id: 'p0222222-0000-0000-0000-000000000001', category_id: 'c2222222-2222-2222-2222-222222222222', name: 'Matcha Latte', price: 38000, sort: 1, active: true },
-  { id: 'p0222222-0000-0000-0000-000000000002', category_id: 'c2222222-2222-2222-2222-222222222222', name: 'Matcha đá xay', price: 45000, sort: 2, active: true },
-  { id: 'p0222222-0000-0000-0000-000000000003', category_id: 'c2222222-2222-2222-2222-222222222222', name: 'Matcha Macchiato', price: 40000, sort: 3, active: true },
+  { id: 'a0222222-0000-0000-0000-000000000001', category_id: 'c2222222-2222-2222-2222-222222222222', name: 'Matcha Latte', price: 38000, sort: 1, active: true },
+  { id: 'a0222222-0000-0000-0000-000000000002', category_id: 'c2222222-2222-2222-2222-222222222222', name: 'Matcha đá xay', price: 45000, sort: 2, active: true },
+  { id: 'a0222222-0000-0000-0000-000000000003', category_id: 'c2222222-2222-2222-2222-222222222222', name: 'Matcha Macchiato', price: 40000, sort: 3, active: true },
 
   // Tea
-  { id: 'p0333333-0000-0000-0000-000000000001', category_id: 'c3333333-3333-3333-3333-333333333333', name: 'Trà đào cam sả', price: 35000, sort: 1, active: true },
-  { id: 'p0333333-0000-0000-0000-000000000002', category_id: 'c3333333-3333-3333-3333-333333333333', name: 'Trà vải lài', price: 35000, sort: 2, active: true },
-  { id: 'p0333333-0000-0000-0000-000000000003', category_id: 'c3333333-3333-3333-3333-333333333333', name: 'Trà sen vàng', price: 38000, sort: 3, active: true },
-  { id: 'p0333333-0000-0000-0000-000000000004', category_id: 'c3333333-3333-3333-3333-333333333333', name: 'Hồng trà sữa trân châu', price: 35000, sort: 4, active: true },
+  { id: 'a0333333-0000-0000-0000-000000000001', category_id: 'c3333333-3333-3333-3333-333333333333', name: 'Trà đào cam sả', price: 35000, sort: 1, active: true },
+  { id: 'a0333333-0000-0000-0000-000000000002', category_id: 'c3333333-3333-3333-3333-333333333333', name: 'Trà vải lài', price: 35000, sort: 2, active: true },
+  { id: 'a0333333-0000-0000-0000-000000000003', category_id: 'c3333333-3333-3333-3333-333333333333', name: 'Trà sen vàng', price: 38000, sort: 3, active: true },
+  { id: 'a0333333-0000-0000-0000-000000000004', category_id: 'c3333333-3333-3333-3333-333333333333', name: 'Hồng trà sữa trân châu', price: 35000, sort: 4, active: true },
 
   // Soda
-  { id: 'p0444444-0000-0000-0000-000000000001', category_id: 'c4444444-4444-4444-4444-444444444444', name: 'Soda việt quất', price: 30000, sort: 1, active: true },
-  { id: 'p0444444-0000-0000-0000-000000000002', category_id: 'c4444444-4444-4444-4444-444444444444', name: 'Soda chanh bạc hà', price: 28000, sort: 2, active: true },
-  { id: 'p0444444-0000-0000-0000-000000000003', category_id: 'c4444444-4444-4444-4444-444444444444', name: 'Soda dâu tây', price: 30000, sort: 3, active: true },
+  { id: 'a0444444-0000-0000-0000-000000000001', category_id: 'c4444444-4444-4444-4444-444444444444', name: 'Soda việt quất', price: 30000, sort: 1, active: true },
+  { id: 'a0444444-0000-0000-0000-000000000002', category_id: 'c4444444-4444-4444-4444-444444444444', name: 'Soda chanh bạc hà', price: 28000, sort: 2, active: true },
+  { id: 'a0444444-0000-0000-0000-000000000003', category_id: 'c4444444-4444-4444-4444-444444444444', name: 'Soda dâu tây', price: 30000, sort: 3, active: true },
 
   // Cake
-  { id: 'p0555555-0000-0000-0000-000000000001', category_id: 'c5555555-5555-5555-5555-555555555555', name: 'Bánh Tiramisu', price: 35000, sort: 1, active: true },
-  { id: 'p0555555-0000-0000-0000-000000000002', category_id: 'c5555555-5555-5555-5555-555555555555', name: 'Croissant bơ Pháp', price: 25000, sort: 2, active: true },
-  { id: 'p0555555-0000-0000-0000-000000000003', category_id: 'c5555555-5555-5555-5555-555555555555', name: 'Bánh mousse chanh dây', price: 32000, sort: 3, active: true },
-  { id: 'p0555555-0000-0000-0000-000000000004', category_id: 'c5555555-5555-5555-5555-555555555555', name: 'Bánh bông lan trứng muối', price: 30000, sort: 4, active: true },
+  { id: 'a0555555-0000-0000-0000-000000000001', category_id: 'c5555555-5555-5555-5555-555555555555', name: 'Bánh Tiramisu', price: 35000, sort: 1, active: true },
+  { id: 'a0555555-0000-0000-0000-000000000002', category_id: 'c5555555-5555-5555-5555-555555555555', name: 'Croissant bơ Pháp', price: 25000, sort: 2, active: true },
+  { id: 'a0555555-0000-0000-0000-000000000003', category_id: 'c5555555-5555-5555-5555-555555555555', name: 'Bánh mousse chanh dây', price: 32000, sort: 3, active: true },
+  { id: 'a0555555-0000-0000-0000-000000000004', category_id: 'c5555555-5555-5555-5555-555555555555', name: 'Bánh bông lan trứng muối', price: 30000, sort: 4, active: true },
 ];
 
 const DEFAULT_SETTINGS: ShopSettings = {
