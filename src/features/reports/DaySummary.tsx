@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { BillWithItems, CashEntry, ShopSettings } from '../../types/database';
+import { BillWithItems, CashEntry, ShopSettings, DayNote } from '../../types/database';
 import { api } from '../../lib/api';
 import { formatVND, parseVND } from '../../lib/money';
 import {
@@ -43,6 +43,7 @@ export const DaySummary: React.FC<DaySummaryProps> = ({ settings }) => {
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   // Form for counted cash (for single day reconciliation)
+  const [lastSavedNote, setLastSavedNote] = useState<DayNote | null>(null);
   const [countedCashStr, setCountedCashStr] = useState<string>('');
   const [closingNote, setClosingNote] = useState<string>('');
   const [isSavingNote, setIsSavingNote] = useState<boolean>(false);
@@ -104,13 +105,14 @@ export const DaySummary: React.FC<DaySummaryProps> = ({ settings }) => {
       // Fetch day note if single day
       if (isSingleDay) {
         const dn = await api.getDayNote(activeStartDate);
-        if (dn) {
-          setCountedCashStr(dn.counted_cash ? formatVND(dn.counted_cash, false) : '');
-          setClosingNote(dn.note || '');
-        } else {
-          setCountedCashStr('');
-          setClosingNote('');
-        }
+        setLastSavedNote(dn);
+        // Requirement: Do not prefill counted cash input on reload (F5) so user enters fresh count
+        setCountedCashStr('');
+        setClosingNote('');
+      } else {
+        setLastSavedNote(null);
+        setCountedCashStr('');
+        setClosingNote('');
       }
     } catch (err) {
       console.error('Error fetching day summary:', err);
@@ -167,12 +169,16 @@ export const DaySummary: React.FC<DaySummaryProps> = ({ settings }) => {
 
   // Save Day Note (Reconciliation)
   const handleSaveDayNote = async () => {
+    if (countedCash === null) {
+      alert('Vui lòng nhập số tiền đếm thực tế trong két trước khi lưu');
+      return;
+    }
     try {
       setIsSavingNote(true);
-      await api.saveDayNote(activeStartDate, countedCash, closingNote.trim() || null);
+      const updated = await api.saveDayNote(activeStartDate, countedCash, closingNote.trim() || null);
+      setLastSavedNote(updated);
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 3000);
-      fetchData();
     } catch (err) {
       alert('Lỗi khi lưu chốt két');
     } finally {
@@ -211,10 +217,30 @@ export const DaySummary: React.FC<DaySummaryProps> = ({ settings }) => {
     ];
 
     if (isSingleDay) {
+      const effectiveCountedCash = countedCash !== null ? countedCash : (lastSavedNote?.counted_cash ?? null);
+      const effectiveDiscrepancy = effectiveCountedCash !== null ? effectiveCountedCash - netCash : null;
+      const effectiveNote = closingNote.trim() || lastSavedNote?.note || '';
+
       rows.push(
-        [escapeCsv('Tiền đếm thực tế trong két'), escapeCsv(countedCash !== null ? countedCash : 'Chưa đếm'), escapeCsv('Số tiền thực tế kiểm đếm')],
-        [escapeCsv('Chênh lệch kiểm két'), escapeCsv(discrepancy !== null ? discrepancy : '--'), escapeCsv(discrepancy === 0 ? 'Khớp 100%' : (discrepancy && discrepancy > 0 ? 'Thừa tiền' : 'Thiếu tiền'))],
-        [escapeCsv('Ghi chú chốt két'), escapeCsv(closingNote || ''), '""']
+        [
+          escapeCsv('Tiền đếm thực tế trong két'),
+          escapeCsv(effectiveCountedCash !== null ? effectiveCountedCash : 'Chưa đếm'),
+          escapeCsv(effectiveCountedCash !== null ? 'Số tiền thực tế kiểm đếm' : 'Chưa nhập số tiền kiểm két')
+        ],
+        [
+          escapeCsv('Chênh lệch kiểm két'),
+          escapeCsv(effectiveDiscrepancy !== null ? effectiveDiscrepancy : '--'),
+          escapeCsv(
+            effectiveDiscrepancy === null
+              ? '--'
+              : effectiveDiscrepancy === 0
+              ? 'Khớp 100%'
+              : effectiveDiscrepancy > 0
+              ? 'Thừa tiền'
+              : 'Thiếu tiền'
+          )
+        ],
+        [escapeCsv('Ghi chú chốt két'), escapeCsv(effectiveNote), '""']
       );
     }
 
@@ -486,10 +512,28 @@ export const DaySummary: React.FC<DaySummaryProps> = ({ settings }) => {
           {/* Cash Drawer Reconciliation (Only when 1 single day is selected) */}
           {isSingleDay && (
             <div className="p-5 bg-amber-50/70 rounded-2xl border border-amber-200 space-y-3">
-              <h3 className="font-bold text-amber-900 text-sm uppercase tracking-wider flex items-center gap-1.5">
-                <Wallet className="w-4 h-4 text-amber-700" />
-                <span>Kiểm két cuối ngày ({formatVietnamDate(activeStartDate)})</span>
-              </h3>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="font-bold text-amber-900 text-sm uppercase tracking-wider flex items-center gap-1.5">
+                  <Wallet className="w-4 h-4 text-amber-700" />
+                  <span>Kiểm két cuối ngày ({formatVietnamDate(activeStartDate)})</span>
+                </h3>
+                {lastSavedNote && lastSavedNote.counted_cash !== null && (
+                  <div className="flex items-center gap-2 text-xs bg-white px-3 py-1 rounded-xl border border-amber-200 shadow-xs">
+                    <span className="text-stone-500 font-medium">Đã lưu trước đó:</span>
+                    <span className="font-black text-amber-800">{formatVND(lastSavedNote.counted_cash)}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCountedCashStr(formatVND(lastSavedNote.counted_cash!, false));
+                        setClosingNote(lastSavedNote.note || '');
+                      }}
+                      className="ml-1 text-[11px] font-bold text-amber-900 underline hover:text-amber-700 cursor-pointer"
+                    >
+                      Điền lại số này
+                    </button>
+                  </div>
+                )}
+              </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
                 <div>
